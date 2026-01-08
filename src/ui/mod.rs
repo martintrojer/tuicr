@@ -5,3 +5,5 @@ pub mod file_list;
 pub mod help_popup;
 pub mod status_bar;
 pub mod styles;
+
+pub use app_layout::render;
