@@ -51,6 +51,10 @@ pub enum Action {
     ClearLine,
     SubmitInput,
 
+    // Confirm dialog
+    ConfirmYes,
+    ConfirmNo,
+
     // No-op
     None,
 }
@@ -61,6 +65,7 @@ pub fn map_key_to_action(key: KeyEvent, mode: InputMode) -> Action {
         InputMode::Command => map_command_mode(key),
         InputMode::Comment => map_comment_mode(key),
         InputMode::Help => map_help_mode(key),
+        InputMode::Confirm => map_confirm_mode(key),
     }
 }
 
@@ -142,6 +147,14 @@ fn map_comment_mode(key: KeyEvent) -> Action {
 fn map_help_mode(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => Action::ToggleHelp,
+        _ => Action::None,
+    }
+}
+
+fn map_confirm_mode(key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Action::ConfirmYes,
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Action::ConfirmNo,
         _ => Action::None,
     }
 }

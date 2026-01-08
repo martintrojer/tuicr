@@ -11,6 +11,12 @@ pub enum InputMode {
     Comment,
     Command,
     Help,
+    Confirm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmAction {
+    CopyAndQuit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +44,7 @@ pub struct App {
     pub should_quit: bool,
     pub dirty: bool,
     pub message: Option<String>,
+    pub pending_confirm: Option<ConfirmAction>,
 }
 
 #[derive(Debug, Default)]
@@ -91,6 +98,7 @@ impl App {
             should_quit: false,
             dirty: false,
             message: None,
+            pending_confirm: None,
         })
     }
 
@@ -325,5 +333,15 @@ impl App {
         } else {
             self.input_mode = InputMode::Help;
         }
+    }
+
+    pub fn enter_confirm_mode(&mut self, action: ConfirmAction) {
+        self.input_mode = InputMode::Confirm;
+        self.pending_confirm = Some(action);
+    }
+
+    pub fn exit_confirm_mode(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.pending_confirm = None;
     }
 }

@@ -125,6 +125,35 @@ pub fn format_comment_line(
     ])
 }
 
+pub fn render_confirm_dialog(frame: &mut Frame, message: &str) {
+    let area = centered_rect(50, 20, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Confirm ")
+        .borders(Borders::ALL)
+        .border_style(styles::border_style(true));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::raw(message)),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [Y]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("es    "),
+            Span::styled("[N]", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("o"),
+        ]),
+    ];
+
+    let paragraph = Paragraph::new(lines).alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(paragraph, inner);
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([Constraint::Percentage(percent_y)]).flex(Flex::Center);
     let horizontal = Layout::horizontal([Constraint::Percentage(percent_x)]).flex(Flex::Center);

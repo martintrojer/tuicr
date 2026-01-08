@@ -48,6 +48,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     if app.input_mode == InputMode::Comment {
         comment_panel::render_comment_input(frame, app);
     }
+
+    // Render confirm dialog if in confirm mode
+    if app.input_mode == InputMode::Confirm {
+        comment_panel::render_confirm_dialog(frame, "Copy review to clipboard?");
+    }
 }
 
 fn render_main_content(frame: &mut Frame, app: &App, area: Rect) {

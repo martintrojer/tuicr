@@ -148,9 +148,17 @@ fn main() -> anyhow::Result<()> {
                                         app.set_message(format!("Save failed: {}", e));
                                     }
                                 },
-                                "wq" => match save_session(&app.session) {
+                                "x" | "wq" => match save_session(&app.session) {
                                     Ok(_) => {
-                                        app.should_quit = true;
+                                        app.dirty = false;
+                                        // Only prompt if there are comments to copy
+                                        if app.session.has_comments() {
+                                            app.exit_command_mode();
+                                            app.enter_confirm_mode(app::ConfirmAction::CopyAndQuit);
+                                            continue;
+                                        } else {
+                                            app.should_quit = true;
+                                        }
                                     }
                                     Err(e) => {
                                         app.set_message(format!("Save failed: {}", e));
@@ -171,6 +179,28 @@ fn main() -> anyhow::Result<()> {
                             app.exit_command_mode();
                         } else if app.input_mode == app::InputMode::Comment {
                             app.save_comment();
+                        }
+                    }
+                    Action::ConfirmYes => {
+                        if app.input_mode == app::InputMode::Confirm {
+                            if let Some(app::ConfirmAction::CopyAndQuit) = app.pending_confirm {
+                                match export_to_clipboard(&app.session) {
+                                    Ok(()) => {
+                                        app.set_message("Review copied to clipboard");
+                                    }
+                                    Err(e) => {
+                                        app.set_message(format!("Export failed: {}", e));
+                                    }
+                                }
+                            }
+                            app.exit_confirm_mode();
+                            app.should_quit = true;
+                        }
+                    }
+                    Action::ConfirmNo => {
+                        if app.input_mode == app::InputMode::Confirm {
+                            app.exit_confirm_mode();
+                            app.should_quit = true;
                         }
                     }
                     _ => {}

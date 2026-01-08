@@ -87,4 +87,8 @@ impl ReviewSession {
     pub fn get_file_mut(&mut self, path: &PathBuf) -> Option<&mut FileReview> {
         self.files.get_mut(path)
     }
+
+    pub fn has_comments(&self) -> bool {
+        self.files.values().any(|f| f.comment_count() > 0)
+    }
 }

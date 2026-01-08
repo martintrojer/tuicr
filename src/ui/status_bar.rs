@@ -42,6 +42,7 @@ pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         InputMode::Command => " COMMAND ",
         InputMode::Comment => " COMMENT ",
         InputMode::Help => " HELP ",
+        InputMode::Confirm => " CONFIRM ",
     };
 
     let mode_span = Span::styled(mode_str, styles::mode_style());
@@ -49,8 +50,9 @@ pub fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let hints = match app.input_mode {
         InputMode::Normal => " j/k:scroll  {/}:file  r:reviewed  c:comment  ?:help  :q:quit ",
         InputMode::Command => " Enter:execute  Esc:cancel ",
-        InputMode::Comment => " Ctrl-Enter:save  Esc:cancel ",
+        InputMode::Comment => " Ctrl-S:save  Esc:cancel ",
         InputMode::Help => " q/?/Esc:close ",
+        InputMode::Confirm => " y:yes  n:no ",
     };
     let hints_span = Span::styled(hints, Style::default().fg(styles::FG_SECONDARY));
 
