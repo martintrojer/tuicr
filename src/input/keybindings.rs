@@ -65,6 +65,10 @@ pub enum Action {
     ToggleCommitSelect,
     ConfirmCommitSelect,
 
+    ToggleExpand,
+    ExpandAll,
+    CollapseAll,
+
     // No-op
     None,
 }
@@ -124,6 +128,10 @@ fn map_normal_mode(key: KeyEvent) -> Action {
 
         // Quick quit
         (KeyCode::Char('q'), KeyModifiers::NONE) => Action::Quit,
+
+        (KeyCode::Char(' '), KeyModifiers::NONE) => Action::ToggleExpand,
+        (KeyCode::Char('o'), KeyModifiers::NONE) => Action::ExpandAll,
+        (KeyCode::Char('O'), _) => Action::CollapseAll,
 
         _ => Action::None,
     }

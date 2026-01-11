@@ -7,7 +7,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, DiffViewMode, FocusedPanel, InputMode};
+use crate::app::{App, DiffViewMode, FileTreeItem, FocusedPanel, InputMode};
 use crate::model::{LineOrigin, LineSide};
 use crate::ui::{comment_panel, help_popup, status_bar, styles};
 
@@ -164,6 +164,9 @@ fn render_main_content(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
+    use ratatui::style::Modifier;
+    use std::path::Path;
+
     let focused = app.focused_panel == FocusedPanel::FileList;
 
     let block = Block::default()
@@ -171,47 +174,91 @@ fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(styles::border_style(focused));
 
-    let current_idx = app.diff_state.current_file_idx;
-    if app.file_list_state.selected() != current_idx {
-        app.file_list_state.select(current_idx);
+    let scroll_x = app.file_list_state.scroll_x;
+    let visible_items = app.build_visible_items();
+
+    if app.focused_panel == FocusedPanel::Diff {
+        let current_file_idx = app.diff_state.current_file_idx;
+        for (tree_idx, item) in visible_items.iter().enumerate() {
+            if let FileTreeItem::File { file_idx, .. } = item
+                && *file_idx == current_file_idx
+            {
+                if app.file_list_state.selected() != tree_idx {
+                    app.file_list_state.select(tree_idx);
+                }
+                break;
+            }
+        }
     }
 
-    let scroll_x = app.file_list_state.scroll_x;
+    let selected_idx = app.file_list_state.selected();
 
-    let items: Vec<ListItem> = app
-        .diff_files
+    let items: Vec<ListItem> = visible_items
         .iter()
         .enumerate()
-        .map(|(i, file)| {
-            let path = file.display_path();
-            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            let status = file.status.as_char();
-            let is_reviewed = app.session.is_file_reviewed(path);
-            let review_mark = if is_reviewed { "✓" } else { " " };
-            let is_current = i == current_idx;
-            let pointer = if is_current { "▶" } else { " " };
+        .map(|(i, item)| {
+            let is_selected = i == selected_idx;
 
-            let style = if is_current {
-                styles::selected_style()
-            } else {
-                Style::default()
-            };
+            match item {
+                FileTreeItem::Directory {
+                    path,
+                    depth,
+                    expanded,
+                } => {
+                    let indent = "  ".repeat(*depth);
+                    let icon = if *expanded { "▾" } else { "▸" };
+                    let dir_name = Path::new(path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(path);
 
-            let line = Line::from(vec![
-                Span::styled(pointer.to_string(), style),
-                Span::styled(
-                    format!("[{}]", review_mark),
-                    if is_reviewed {
-                        styles::reviewed_style()
+                    let style = if is_selected {
+                        styles::selected_style().add_modifier(Modifier::UNDERLINED)
                     } else {
-                        styles::pending_style()
-                    },
-                ),
-                Span::styled(format!(" {} ", status), styles::file_status_style(status)),
-                Span::styled(filename.to_string(), style),
-            ]);
+                        Style::default()
+                    };
 
-            ListItem::new(apply_horizontal_scroll(line, scroll_x))
+                    let line = Line::from(vec![
+                        Span::styled(indent, Style::default()),
+                        Span::styled(format!("{} ", icon), styles::dir_icon_style()),
+                        Span::styled(format!("{}/", dir_name), style),
+                    ]);
+
+                    ListItem::new(apply_horizontal_scroll(line, scroll_x))
+                }
+                FileTreeItem::File { file_idx, depth } => {
+                    let file = &app.diff_files[*file_idx];
+                    let path = file.display_path();
+                    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    let status = file.status.as_char();
+                    let is_reviewed = app.session.is_file_reviewed(path);
+                    let review_mark = if is_reviewed { "✓" } else { " " };
+
+                    let indent = "  ".repeat(*depth);
+
+                    let style = if is_selected {
+                        styles::selected_style().add_modifier(Modifier::UNDERLINED)
+                    } else {
+                        Style::default()
+                    };
+
+                    let line = Line::from(vec![
+                        Span::styled(indent, Style::default()),
+                        Span::styled(
+                            format!("[{}]", review_mark),
+                            if is_reviewed {
+                                styles::reviewed_style()
+                            } else {
+                                styles::pending_style()
+                            },
+                        ),
+                        Span::styled(format!(" {} ", status), styles::file_status_style(status)),
+                        Span::styled(filename.to_string(), style),
+                    ]);
+
+                    ListItem::new(apply_horizontal_scroll(line, scroll_x))
+                }
+            }
         })
         .collect();
 
