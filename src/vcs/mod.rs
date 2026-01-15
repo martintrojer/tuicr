@@ -3,31 +3,42 @@
 //! Currently supports:
 //! - Git (always enabled)
 //! - Mercurial (optional, via `hg` feature flag)
+//! - Jujutsu (optional, via `jj` feature flag)
 //!
 //! ## Detection Order
 //!
-//! When auto-detecting the VCS type, Git is tried first since it's the most
-//! common. This means that in a directory that is both a Git and Mercurial
-//! repository, Git will be used. If Git detection fails and the `hg` feature
-//! is enabled, Mercurial is tried next.
+//! When auto-detecting the VCS type, Jujutsu is tried first (if enabled)
+//! because jj repos are Git-backed and contain a `.git` directory. If jj
+//! detection fails, Git is tried next, then Mercurial (if enabled).
 
 pub mod git;
 #[cfg(feature = "hg")]
 mod hg;
+#[cfg(feature = "jj")]
+mod jj;
 mod traits;
 
 pub use git::GitBackend;
 #[cfg(feature = "hg")]
 pub use hg::HgBackend;
+#[cfg(feature = "jj")]
+pub use jj::JjBackend;
 pub use traits::{CommitInfo, VcsBackend, VcsInfo};
 
 use crate::error::{Result, TuicrError};
 
 /// Detect the VCS type and return the appropriate backend.
 ///
-/// Tries Git first (most common), then Mercurial if the `hg` feature is enabled.
+/// Detection order: Jujutsu (if enabled) → Git → Mercurial (if enabled).
+/// Jujutsu is tried first because jj repos are Git-backed.
 pub fn detect_vcs() -> Result<Box<dyn VcsBackend>> {
-    // Try git first
+    // Try jj first since jj repos are Git-backed
+    #[cfg(feature = "jj")]
+    if let Ok(backend) = JjBackend::discover() {
+        return Ok(Box::new(backend));
+    }
+
+    // Try git
     if let Ok(backend) = GitBackend::discover() {
         return Ok(Box::new(backend));
     }
@@ -146,6 +157,62 @@ mod tests {
         let info = backend.info();
 
         assert_eq!(info.vcs_type, VcsType::Mercurial);
+        assert_eq!(info.root_path, root);
+    }
+
+    #[cfg(feature = "jj")]
+    #[test]
+    fn detect_vcs_finds_jj_repo() {
+        use std::fs;
+        use std::process::Command;
+
+        // Check if jj is available
+        let jj_available = Command::new("jj")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !jj_available {
+            eprintln!("Skipping test: jj command not available");
+            return;
+        }
+
+        // Create a temp jj repo
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let root = temp_dir.path();
+
+        // Initialize jj repo (git-backed)
+        let output = Command::new("jj")
+            .args(["git", "init"])
+            .current_dir(root)
+            .output()
+            .expect("Failed to init jj repo");
+
+        if !output.status.success() {
+            eprintln!(
+                "Skipping test: jj git init failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        // Create and commit a file
+        fs::write(root.join("test.txt"), "test\n").expect("Failed to write file");
+        Command::new("jj")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(root)
+            .output()
+            .expect("Failed to commit");
+
+        // Change to the temp dir and detect VCS
+        std::env::set_current_dir(root).unwrap();
+
+        let backend = detect_vcs().expect("Should detect jj repo");
+        let info = backend.info();
+
+        // jj should be detected before git since jj repos are git-backed
+        assert_eq!(info.vcs_type, VcsType::Jujutsu);
         assert_eq!(info.root_path, root);
     }
 }
