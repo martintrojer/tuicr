@@ -1,24 +1,40 @@
 //! VCS abstraction layer for supporting multiple version control systems.
 //!
-//! This module provides a unified interface for interacting with different
-//! version control systems. Currently supports Git, with the architecture
-//! designed to easily add support for other VCS like Mercurial (hg) or Jujutsu (jj).
+//! Currently supports:
+//! - Git (always enabled)
+//! - Mercurial (optional, via `hg` feature flag)
+//!
+//! ## Detection Order
+//!
+//! When auto-detecting the VCS type, Git is tried first since it's the most
+//! common. This means that in a directory that is both a Git and Mercurial
+//! repository, Git will be used. If Git detection fails and the `hg` feature
+//! is enabled, Mercurial is tried next.
 
 pub mod git;
+#[cfg(feature = "hg")]
+mod hg;
 mod traits;
 
 pub use git::GitBackend;
+#[cfg(feature = "hg")]
+pub use hg::HgBackend;
 pub use traits::{CommitInfo, VcsBackend, VcsInfo};
 
 use crate::error::{Result, TuicrError};
 
 /// Detect the VCS type and return the appropriate backend.
 ///
-/// Currently only supports Git. Future versions may add support for
-/// other VCS like Mercurial or Jujutsu.
+/// Tries Git first (most common), then Mercurial if the `hg` feature is enabled.
 pub fn detect_vcs() -> Result<Box<dyn VcsBackend>> {
-    // Try git first (currently the only supported VCS)
+    // Try git first
     if let Ok(backend) = GitBackend::discover() {
+        return Ok(Box::new(backend));
+    }
+
+    // Try hg if feature is enabled
+    #[cfg(feature = "hg")]
+    if let Ok(backend) = HgBackend::discover() {
         return Ok(Box::new(backend));
     }
 
@@ -79,5 +95,57 @@ mod tests {
                 panic!("Unexpected error: {:?}", e);
             }
         }
+    }
+
+    #[cfg(feature = "hg")]
+    #[test]
+    fn detect_vcs_finds_hg_repo() {
+        use std::fs;
+        use std::process::Command;
+
+        // Check if hg is available
+        let hg_available = Command::new("hg")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !hg_available {
+            eprintln!("Skipping test: hg command not available");
+            return;
+        }
+
+        // Create a temp hg-only repo (no git)
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let root = temp_dir.path();
+
+        // Initialize hg repo
+        Command::new("hg")
+            .args(["init"])
+            .current_dir(root)
+            .output()
+            .expect("Failed to init hg repo");
+
+        // Create and commit a file
+        fs::write(root.join("test.txt"), "test\n").expect("Failed to write file");
+        Command::new("hg")
+            .args(["add", "test.txt"])
+            .current_dir(root)
+            .output()
+            .expect("Failed to add file");
+        Command::new("hg")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(root)
+            .output()
+            .expect("Failed to commit");
+
+        // Change to the temp dir and detect VCS
+        std::env::set_current_dir(root).unwrap();
+
+        let backend = detect_vcs().expect("Should detect hg repo");
+        let info = backend.info();
+
+        assert_eq!(info.vcs_type, VcsType::Mercurial);
+        assert_eq!(info.root_path, root);
     }
 }
