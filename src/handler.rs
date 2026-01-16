@@ -7,7 +7,7 @@ use crate::persistence::save_session;
 /// When output_to_stdout is true, stores the content and sets should_quit.
 fn handle_export(app: &mut App) {
     if app.output_to_stdout {
-        match generate_export_content(&app.session, &app.diff_source) {
+        match generate_export_content(&app.session, &app.diff_source, app.vcs_info.vcs_type) {
             Ok(content) => {
                 app.pending_stdout_output = Some(content);
                 app.should_quit = true;
@@ -15,7 +15,7 @@ fn handle_export(app: &mut App) {
             Err(e) => app.set_warning(format!("{e}")),
         }
     } else {
-        match export_to_clipboard(&app.session, &app.diff_source) {
+        match export_to_clipboard(&app.session, &app.diff_source, app.vcs_info.vcs_type) {
             Ok(msg) => app.set_message(msg),
             Err(e) => app.set_warning(format!("{e}")),
         }
@@ -320,12 +320,17 @@ pub fn handle_confirm_action(app: &mut App, action: Action) {
         Action::ConfirmYes => {
             if let Some(app::ConfirmAction::CopyAndQuit) = app.pending_confirm {
                 if app.output_to_stdout {
-                    match generate_export_content(&app.session, &app.diff_source) {
+                    match generate_export_content(
+                        &app.session,
+                        &app.diff_source,
+                        app.vcs_info.vcs_type,
+                    ) {
                         Ok(content) => app.pending_stdout_output = Some(content),
                         Err(e) => app.set_warning(format!("{e}")),
                     }
                 } else {
-                    match export_to_clipboard(&app.session, &app.diff_source) {
+                    match export_to_clipboard(&app.session, &app.diff_source, app.vcs_info.vcs_type)
+                    {
                         Ok(msg) => app.set_message(msg),
                         Err(e) => app.set_warning(format!("{e}")),
                     }
