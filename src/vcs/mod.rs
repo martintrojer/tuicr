@@ -27,7 +27,7 @@ pub use jj::JjBackend;
 pub use pr_noop::PrNoopVcs;
 pub use traits::{
     ChangeKind, CommitInfo, DiffWhitespaceMode, ResolvedRevisionRange, RevisionDiffTarget,
-    VcsBackend, VcsChangeStatus, VcsInfo,
+    VcsBackend, VcsChangeStatus, VcsInfo, VcsType,
 };
 
 use std::collections::HashMap;

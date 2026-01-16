@@ -13,6 +13,7 @@ use crate::forge::remote_comments::{
 };
 use crate::model::{CommentType, LineRange, LineSide, ReviewSession};
 use crate::slug::short_sha;
+use crate::vcs::VcsType;
 /// (file_path, line_range, side, comment_type, content, commit_id)
 type CommentEntry<'a> = (
     String,
@@ -32,6 +33,7 @@ pub fn generate_export_content(
     export: &ExportConfig,
     remote_threads: &[RemoteReviewThread],
     session_slug: Option<&str>,
+    vcs_type: VcsType,
 ) -> Result<String> {
     // In PR mode it's still useful to export PR identity + remote
     // discussions even if the user has no local drafts. Outside PR mode
@@ -48,6 +50,7 @@ pub fn generate_export_content(
         export,
         remote_threads,
         session_slug,
+        vcs_type,
     ))
 }
 
@@ -58,6 +61,7 @@ pub fn export_to_clipboard(
     export: &ExportConfig,
     remote_threads: &[RemoteReviewThread],
     session_slug: Option<&str>,
+    vcs_type: VcsType,
 ) -> Result<String> {
     let content = generate_export_content(
         session,
@@ -66,6 +70,7 @@ pub fn export_to_clipboard(
         export,
         remote_threads,
         session_slug,
+        vcs_type,
     )?;
     let via_terminal = copy_text_to_clipboard(&content)?;
     Ok(if via_terminal {
@@ -263,6 +268,7 @@ fn generate_markdown(
     export: &ExportConfig,
     remote_threads: &[RemoteReviewThread],
     session_slug: Option<&str>,
+    vcs_type: VcsType,
 ) -> String {
     let mut md = String::new();
 
@@ -276,6 +282,24 @@ fn generate_markdown(
     let intro = export.intro();
     if !intro.is_empty() {
         let _ = writeln!(md, "{intro}");
+        let _ = writeln!(md);
+    }
+
+    // VCS type info for agents (omit when Git is the default)
+    let vcs_note = match vcs_type {
+        VcsType::Git => None,
+        VcsType::Mercurial => {
+            Some("This is a Mercurial repository. Use `hg` commands instead of `git`.")
+        }
+        VcsType::Jujutsu => {
+            Some("This is a Jujutsu repository. Use `jj` commands instead of `git`.")
+        }
+        VcsType::File => Some(
+            "This review is for a standalone file, not a VCS repository. Edit the file directly instead of using `git`, `jj`, or `hg` commands.",
+        ),
+    };
+    if let Some(note) = vcs_note {
+        let _ = writeln!(md, "{note}");
         let _ = writeln!(md);
     }
 
@@ -610,6 +634,7 @@ mod tests {
                 false,
             )],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("## Comments"));
@@ -641,6 +666,7 @@ mod tests {
                 false,
             )],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("## Local tuicr Comments"));
@@ -665,6 +691,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("Reviewing unstaged changes"));
@@ -687,6 +714,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("Reviewing pull request"));
@@ -709,6 +737,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Reviewing pull request agavra/tuicr#125"));
@@ -733,6 +762,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("Reviewing pull request"));
@@ -758,6 +788,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Code review comments:"));
@@ -779,6 +810,7 @@ mod tests {
             &export,
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("I reviewed your code"));
@@ -859,6 +891,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             Some("agavra/tuicr@main/worktree"),
+            VcsType::Git,
         );
 
         assert!(
@@ -879,6 +912,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("## Session:"));
@@ -898,6 +932,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -961,6 +996,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(
@@ -1004,6 +1040,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Comment types: QUESTION (ask for clarification)"));
@@ -1024,6 +1061,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1056,6 +1094,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         let expected = "\
@@ -1099,6 +1138,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         let expected = "\
@@ -1127,6 +1167,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown
@@ -1149,6 +1190,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains(
@@ -1179,6 +1221,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(
@@ -1198,6 +1241,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // Existing comments have commit_id = None — no (commit ...) suffix
@@ -1226,6 +1270,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1247,6 +1292,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1276,6 +1322,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1300,6 +1347,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1320,10 +1368,93 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
         assert!(markdown.contains("Reviewing commit: abc1234"));
+    }
+
+    #[test]
+    fn should_include_jujutsu_vcs_info() {
+        // given
+        let session = create_test_session();
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+            VcsType::Jujutsu,
+        );
+
+        // then
+        assert!(markdown.contains("This is a Jujutsu repository."));
+        assert!(markdown.contains("Use `jj` commands instead of `git`."));
+    }
+
+    #[test]
+    fn should_include_mercurial_vcs_info() {
+        // given
+        let session = create_test_session();
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+            VcsType::Mercurial,
+        );
+
+        // then
+        assert!(markdown.contains("This is a Mercurial repository."));
+        assert!(markdown.contains("Use `hg` commands instead of `git`."));
+    }
+
+    #[test]
+    fn should_omit_vcs_info_for_git() {
+        // given
+        let session = create_test_session();
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+            VcsType::Git,
+        );
+
+        // then
+        assert!(!markdown.contains("repository. Use"));
+    }
+
+    #[test]
+    fn should_include_file_mode_info() {
+        // given
+        let session = create_test_session();
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &comment_types(),
+            &ExportConfig::default(),
+            &[],
+            None,
+            VcsType::File,
+        );
+
+        // then
+        assert!(markdown.contains("standalone file"));
     }
 
     #[test]
@@ -1388,6 +1519,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
         let mut buffer: Vec<u8> = Vec::new();
 
@@ -1437,6 +1569,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1477,6 +1610,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1517,6 +1651,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1556,6 +1691,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1595,6 +1731,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1613,6 +1750,7 @@ mod tests {
             &legend_off(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(!markdown.contains("Comment types:"));
@@ -1644,6 +1782,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Comment types: PRAISE (positive feedback)"));
@@ -1687,6 +1826,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         // No `[TYPE]` marker on the comment and no legend line at all.
@@ -1786,6 +1926,7 @@ mod tests {
             &ExportConfig::default(),
             &threads,
             None,
+            VcsType::Git,
         );
 
         // then
@@ -1821,6 +1962,7 @@ mod tests {
             &ExportConfig::default(),
             &threads,
             None,
+            VcsType::Git,
         );
 
         // then — export succeeds even with no local comments
@@ -1859,6 +2001,7 @@ mod tests {
             &ExportConfig::default(),
             &threads,
             None,
+            VcsType::Git,
         );
 
         // then — the section is omitted in non-PR modes
@@ -1904,6 +2047,7 @@ mod tests {
             &ExportConfig::default(),
             &[],
             None,
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Comment types: QUESTION (ask for clarification)"));
