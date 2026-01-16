@@ -11,6 +11,7 @@ use crate::forge::remote_comments::{
     PrCommentsVisibility, RemoteReviewThread, filter_threads, group_threads_by_path,
 };
 use crate::model::{CommentType, LineRange, LineSide, ReviewSession};
+use crate::vcs::VcsType;
 
 /// (file_path, line_range, side, comment_type, content)
 type CommentEntry<'a> = (String, Option<LineRange>, Option<LineSide>, String, &'a str);
@@ -23,6 +24,7 @@ pub fn generate_export_content(
     comment_types: &[CommentTypeDefinition],
     show_legend: bool,
     remote_threads: &[RemoteReviewThread],
+    vcs_type: VcsType,
 ) -> Result<String> {
     // In PR mode it's still useful to export PR identity + remote
     // discussions even if the user has no local drafts. Outside PR mode
@@ -38,6 +40,7 @@ pub fn generate_export_content(
         comment_types,
         show_legend,
         remote_threads,
+        vcs_type,
     ))
 }
 
@@ -47,6 +50,7 @@ pub fn export_to_clipboard(
     comment_types: &[CommentTypeDefinition],
     show_legend: bool,
     remote_threads: &[RemoteReviewThread],
+    vcs_type: VcsType,
 ) -> Result<String> {
     let content = generate_export_content(
         session,
@@ -54,6 +58,7 @@ pub fn export_to_clipboard(
         comment_types,
         show_legend,
         remote_threads,
+        vcs_type,
     )?;
     let via_terminal = copy_text_to_clipboard(&content)?;
     Ok(if via_terminal {
@@ -172,6 +177,7 @@ fn generate_markdown(
     comment_types: &[CommentTypeDefinition],
     show_legend: bool,
     remote_threads: &[RemoteReviewThread],
+    vcs_type: VcsType,
 ) -> String {
     let mut md = String::new();
 
@@ -181,6 +187,22 @@ fn generate_markdown(
         "I reviewed your code and have the following comments. Please address them."
     );
     let _ = writeln!(md);
+
+    // VCS type info for agents (omit when Git is the default)
+    if !matches!(vcs_type, VcsType::Git) {
+        let vcs_note = match vcs_type {
+            VcsType::Git => unreachable!("Git handled by matches! guard"),
+            VcsType::Mercurial => {
+                "This is a Mercurial repository. Use `hg` commands instead of `git`."
+            }
+            VcsType::Jujutsu => "This is a Jujutsu repository. Use `jj` commands instead of `git`.",
+            VcsType::File => {
+                "This review is for a standalone file, not a VCS repository. Edit the file directly instead of using `git`, `jj`, or `hg` commands."
+            }
+        };
+        let _ = writeln!(md, "{}", vcs_note);
+        let _ = writeln!(md);
+    }
 
     // Include commit range info if reviewing commits
     match diff_source {
@@ -519,10 +541,18 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("I reviewed your code and have the following comments"));
+        assert!(!markdown.contains("This is a Git repository."));
         assert!(
             markdown.contains("Comment types: SUGGESTION (improvements), ISSUE (problems to fix)")
         );
@@ -560,8 +590,14 @@ mod tests {
             color: None,
         }];
 
-        let markdown =
-            generate_markdown(&session, &DiffSource::WorkingTree, &custom_types, true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &custom_types,
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         assert!(markdown.contains("Comment types: QUESTION (ask for clarification)"));
         assert!(markdown.contains("**[QUESTION]**"));
@@ -574,7 +610,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         // Should have 2 numbered comments
@@ -597,6 +640,7 @@ mod tests {
             &comment_types(),
             true,
             &[],
+            VcsType::Git,
         );
 
         assert!(markdown
@@ -618,6 +662,7 @@ mod tests {
             &comment_types(),
             true,
             &[],
+            VcsType::Git,
         );
 
         assert!(markdown.contains(
@@ -637,7 +682,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let result = export_to_clipboard(&session, &diff_source, &comment_types(), true, &[]);
+        let result = export_to_clipboard(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(result.is_err());
@@ -651,7 +703,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let result = generate_export_content(&session, &diff_source, &comment_types(), true, &[]);
+        let result = generate_export_content(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(result.is_ok());
@@ -673,7 +732,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let result = generate_export_content(&session, &diff_source, &comment_types(), true, &[]);
+        let result = generate_export_content(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(result.is_err());
@@ -690,7 +756,14 @@ mod tests {
         ]);
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("Reviewing commits: abc1234, def4567"));
@@ -703,10 +776,59 @@ mod tests {
         let diff_source = DiffSource::CommitRange(vec!["abc1234567890".to_string()]);
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("Reviewing commit: abc1234"));
+    }
+
+    #[test]
+    fn should_include_jujutsu_vcs_info() {
+        // given
+        let session = create_test_session();
+        let diff_source = DiffSource::WorkingTree;
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Jujutsu,
+        );
+
+        // then
+        assert!(markdown.contains("This is a Jujutsu repository."));
+        assert!(markdown.contains("Use `jj` commands instead of `git`."));
+    }
+
+    #[test]
+    fn should_include_mercurial_vcs_info() {
+        // given
+        let session = create_test_session();
+        let diff_source = DiffSource::WorkingTree;
+
+        // when
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Mercurial,
+        );
+
+        // then
+        assert!(markdown.contains("This is a Mercurial repository."));
+        assert!(markdown.contains("Use `hg` commands instead of `git`."));
     }
 
     #[test]
@@ -764,7 +886,14 @@ mod tests {
         // given - simulate what would be copied during export
         let session = create_test_session();
         let diff_source = DiffSource::WorkingTree;
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
         let mut buffer: Vec<u8> = Vec::new();
 
         // when
@@ -806,7 +935,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("`src/main.rs:42`"));
@@ -839,7 +975,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("`src/main.rs:10-15`"));
@@ -872,7 +1015,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("`src/main.rs:~20-~25`"));
@@ -904,7 +1054,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("`src/main.rs:~30`"));
@@ -936,7 +1093,14 @@ mod tests {
         let diff_source = DiffSource::WorkingTree;
 
         // when
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         // then
         assert!(markdown.contains("`src/main.rs:50`"));
@@ -947,7 +1111,14 @@ mod tests {
         let session = create_test_session();
         let diff_source = DiffSource::WorkingTree;
 
-        let markdown = generate_markdown(&session, &diff_source, &comment_types(), false, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &diff_source,
+            &comment_types(),
+            false,
+            &[],
+            VcsType::Git,
+        );
 
         assert!(!markdown.contains("Comment types:"));
         assert!(markdown.contains("[SUGGESTION]"));
@@ -977,6 +1148,7 @@ mod tests {
             &comment_types(),
             true,
             &[],
+            VcsType::Git,
         );
 
         assert!(markdown.contains("Comment types: PRAISE (positive feedback)"));
@@ -1064,6 +1236,7 @@ mod tests {
             &comment_types(),
             true,
             &threads,
+            VcsType::Git,
         );
 
         // then
@@ -1098,6 +1271,7 @@ mod tests {
             &comment_types(),
             true,
             &threads,
+            VcsType::Git,
         );
 
         // then — export succeeds even with no local comments
@@ -1131,6 +1305,7 @@ mod tests {
             &comment_types(),
             true,
             &threads,
+            VcsType::Git,
         );
 
         // then — the section is omitted in non-PR modes
@@ -1169,8 +1344,14 @@ mod tests {
             },
         ];
 
-        let markdown =
-            generate_markdown(&session, &DiffSource::WorkingTree, &custom_types, true, &[]);
+        let markdown = generate_markdown(
+            &session,
+            &DiffSource::WorkingTree,
+            &custom_types,
+            true,
+            &[],
+            VcsType::Git,
+        );
 
         assert!(markdown.contains("Comment types: QUESTION (ask for clarification)"));
         assert!(!markdown.contains("ISSUE"));

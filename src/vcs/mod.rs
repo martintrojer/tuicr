@@ -24,7 +24,7 @@ pub use git::{GitBackend, GitBackendPreference};
 pub use hg::HgBackend;
 pub use jj::JjBackend;
 pub use pr_noop::PrNoopVcs;
-pub use traits::{CommitInfo, VcsBackend, VcsChangeStatus, VcsInfo};
+pub use traits::{CommitInfo, VcsBackend, VcsChangeStatus, VcsInfo, VcsType};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
