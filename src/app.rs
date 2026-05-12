@@ -16,7 +16,9 @@ use crate::syntax::SyntaxHighlighter;
 use crate::theme::Theme;
 use crate::update::UpdateInfo;
 use crate::vcs::git::calculate_gap;
-use crate::vcs::{CommitInfo, FileBackend, VcsBackend, VcsInfo, detect_vcs};
+use crate::vcs::{
+    CommitInfo, FileBackend, GitBackendPreference, VcsBackend, VcsChangeStatus, VcsInfo, detect_vcs,
+};
 
 const VISIBLE_COMMIT_COUNT: usize = 10;
 const COMMIT_PAGE_SIZE: usize = 10;
@@ -609,18 +611,23 @@ enum CommentLocation {
     },
 }
 
+pub struct AppStartupOptions<'a> {
+    pub revisions: Option<&'a str>,
+    pub working_tree: bool,
+    pub path_filter: Option<&'a str>,
+    pub file_path: Option<&'a str>,
+    pub git_backend_preference: GitBackendPreference,
+}
+
 impl App {
     pub fn new(
         theme: Theme,
         comment_type_configs: Option<Vec<CommentTypeConfig>>,
         output_to_stdout: bool,
-        revisions: Option<&str>,
-        working_tree: bool,
-        path_filter: Option<&str>,
-        file_path: Option<&str>,
+        options: AppStartupOptions<'_>,
     ) -> Result<Self> {
         // --file mode: open a single file for annotation without VCS
-        if let Some(file_path) = file_path {
+        if let Some(file_path) = options.file_path {
             let vcs = Box::new(FileBackend::new(file_path)?);
             let vcs_info = vcs.info().clone();
             let highlighter = theme.syntax_highlighter();
@@ -648,7 +655,9 @@ impl App {
             return Ok(app);
         }
 
-        let vcs = crate::profile::time("startup.detect_vcs", detect_vcs)?;
+        let vcs = crate::profile::time("startup.detect_vcs", || {
+            detect_vcs(options.git_backend_preference)
+        })?;
         let vcs_info = vcs.info().clone();
         let highlighter =
             crate::profile::time("startup.syntax_highlighter", || theme.syntax_highlighter());
@@ -658,7 +667,7 @@ impl App {
         //   2. -r only: commit range
         //   3. -w only: working tree directly (skip commit selector)
         //   4. neither: commit selection UI
-        if let Some(revisions) = revisions {
+        if let Some(revisions) = options.revisions {
             let commit_ids = crate::profile::time_with(
                 "startup.resolve_revisions",
                 || vcs.resolve_revisions(revisions),
@@ -668,14 +677,14 @@ impl App {
                 },
             )?;
 
-            if working_tree {
+            if options.working_tree {
                 // Combined: commit range + staged/unstaged changes
                 let diff_files = Self::get_working_tree_with_commits_diff_with_ignore(
                     vcs.as_ref(),
                     &vcs_info.root_path,
                     &commit_ids,
                     highlighter,
-                    path_filter,
+                    options.path_filter,
                 )?;
                 let session = Self::load_or_create_staged_unstaged_and_commits_session(
                     &vcs_info,
@@ -690,25 +699,17 @@ impl App {
                 .rev()
                 .collect();
                 // Prepend staged/unstaged entries only when the backend supports them
-                let has_staged = Self::get_staged_diff_with_ignore(
+                let (change_status, _) = Self::get_change_status_with_ignore(
                     vcs.as_ref(),
                     &vcs_info.root_path,
                     highlighter,
-                    path_filter,
-                )
-                .is_ok();
-                let has_unstaged = Self::get_unstaged_diff_with_ignore(
-                    vcs.as_ref(),
-                    &vcs_info.root_path,
-                    highlighter,
-                    path_filter,
-                )
-                .is_ok();
+                    options.path_filter,
+                )?;
                 let mut all_commits = Vec::new();
-                if has_staged {
+                if change_status.staged {
                     all_commits.push(Self::staged_commit_entry());
                 }
-                if has_unstaged {
+                if change_status.unstaged {
                     all_commits.push(Self::unstaged_commit_entry());
                 }
                 all_commits.extend(review_commits);
@@ -724,7 +725,7 @@ impl App {
                     DiffSource::StagedUnstagedAndCommits(commit_ids),
                     InputMode::Normal,
                     Vec::new(),
-                    path_filter,
+                    options.path_filter,
                 )?;
 
                 app.range_diff_files = Some(app.diff_files.clone());
@@ -755,7 +756,7 @@ impl App {
                 &vcs_info.root_path,
                 &commit_ids,
                 highlighter,
-                path_filter,
+                options.path_filter,
             )?;
             let session = Self::load_or_create_commit_range_session(&vcs_info, &commit_ids);
             // Get commit info for the inline commit selector
@@ -778,7 +779,7 @@ impl App {
                 DiffSource::CommitRange(commit_ids),
                 InputMode::Normal,
                 Vec::new(),
-                path_filter,
+                options.path_filter,
             )?;
 
             // Set up inline commit selector for multi-commit reviews
@@ -800,13 +801,13 @@ impl App {
             app.rebuild_annotations();
 
             Ok(app)
-        } else if working_tree {
+        } else if options.working_tree {
             // Skip commit selector, go straight to working tree diff
             let diff_files = Self::get_working_tree_diff_with_ignore(
                 vcs.as_ref(),
                 &vcs_info.root_path,
                 highlighter,
-                path_filter,
+                options.path_filter,
             )?;
             let session =
                 Self::load_or_create_session(&vcs_info, SessionDiffSource::StagedAndUnstaged);
@@ -822,49 +823,35 @@ impl App {
                 DiffSource::StagedAndUnstaged,
                 InputMode::Normal,
                 Vec::new(),
-                path_filter,
+                options.path_filter,
             )?;
 
             Ok(app)
         } else {
-            let has_staged_changes = match Self::get_staged_diff_with_ignore(
+            let (change_status, used_backend_status_probe) = Self::get_change_status_with_ignore(
                 vcs.as_ref(),
                 &vcs_info.root_path,
                 highlighter,
-                path_filter,
-            ) {
-                Ok(_) => true,
-                Err(TuicrError::NoChanges) => false,
-                Err(TuicrError::UnsupportedOperation(_)) => false,
-                Err(e) => return Err(e),
-            };
+                options.path_filter,
+            )?;
+            let has_staged_changes = change_status.staged;
+            let has_unstaged_changes = change_status.unstaged;
 
-            let has_unstaged_changes = match Self::get_unstaged_diff_with_ignore(
-                vcs.as_ref(),
-                &vcs_info.root_path,
-                highlighter,
-                path_filter,
-            ) {
-                Ok(_) => true,
-                Err(TuicrError::NoChanges) => false,
-                Err(TuicrError::UnsupportedOperation(_)) => false,
-                Err(e) => return Err(e),
-            };
-
-            let working_tree_diff = if has_staged_changes || has_unstaged_changes {
-                match Self::get_working_tree_diff_with_ignore(
-                    vcs.as_ref(),
-                    &vcs_info.root_path,
-                    highlighter,
-                    path_filter,
-                ) {
-                    Ok(diff_files) => Some(diff_files),
-                    Err(TuicrError::NoChanges) => None,
-                    Err(e) => return Err(e),
-                }
-            } else {
-                None
-            };
+            let working_tree_diff =
+                if (has_staged_changes || has_unstaged_changes) && !used_backend_status_probe {
+                    match Self::get_working_tree_diff_with_ignore(
+                        vcs.as_ref(),
+                        &vcs_info.root_path,
+                        highlighter,
+                        options.path_filter,
+                    ) {
+                        Ok(diff_files) => Some(diff_files),
+                        Err(TuicrError::NoChanges) => None,
+                        Err(e) => return Err(e),
+                    }
+                } else {
+                    None
+                };
 
             let commits = crate::profile::time_with(
                 "startup.recent_commits",
@@ -916,7 +903,7 @@ impl App {
                 diff_source,
                 InputMode::CommitSelect,
                 commit_list,
-                path_filter,
+                options.path_filter,
             )?;
 
             app.has_more_commit = commits.len() >= VISIBLE_COMMIT_COUNT;
@@ -1416,6 +1403,14 @@ impl App {
         Ok(diff_files)
     }
 
+    fn diff_exists(diff_files: Result<Vec<DiffFile>>) -> Result<bool> {
+        match diff_files {
+            Ok(_) => Ok(true),
+            Err(TuicrError::NoChanges) | Err(TuicrError::UnsupportedOperation(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
     fn get_working_tree_diff_with_ignore(
         vcs: &dyn VcsBackend,
         repo_root: &Path,
@@ -1524,6 +1519,57 @@ impl App {
             diff_files
         };
         Self::require_non_empty_diff_files(diff_files)
+    }
+
+    fn get_change_status_with_ignore(
+        vcs: &dyn VcsBackend,
+        repo_root: &Path,
+        highlighter: &SyntaxHighlighter,
+        path_filter: Option<&str>,
+    ) -> Result<(VcsChangeStatus, bool)> {
+        if path_filter.is_none() {
+            match vcs.get_change_status() {
+                Ok(status) => {
+                    if !crate::tuicrignore::has_ignore_rules(repo_root) {
+                        return Ok((status, true));
+                    }
+
+                    let staged = status.staged
+                        && Self::diff_exists(Self::get_staged_diff_with_ignore(
+                            vcs,
+                            repo_root,
+                            highlighter,
+                            path_filter,
+                        ))?;
+                    let unstaged = status.unstaged
+                        && Self::diff_exists(Self::get_unstaged_diff_with_ignore(
+                            vcs,
+                            repo_root,
+                            highlighter,
+                            path_filter,
+                        ))?;
+
+                    return Ok((VcsChangeStatus { staged, unstaged }, true));
+                }
+                Err(TuicrError::UnsupportedOperation(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+
+        let staged = Self::diff_exists(Self::get_staged_diff_with_ignore(
+            vcs,
+            repo_root,
+            highlighter,
+            path_filter,
+        ))?;
+        let unstaged = Self::diff_exists(Self::get_unstaged_diff_with_ignore(
+            vcs,
+            repo_root,
+            highlighter,
+            path_filter,
+        ))?;
+
+        Ok((VcsChangeStatus { staged, unstaged }, false))
     }
 
     fn load_staged_and_unstaged_selection(&mut self) -> Result<()> {
@@ -3563,29 +3609,14 @@ impl App {
         }
 
         let highlighter = self.theme.syntax_highlighter();
-        let has_staged_changes = match Self::get_staged_diff_with_ignore(
+        let (change_status, _) = Self::get_change_status_with_ignore(
             self.vcs.as_ref(),
             &self.vcs_info.root_path,
             highlighter,
             self.path_filter.as_deref(),
-        ) {
-            Ok(_) => true,
-            Err(TuicrError::NoChanges) => false,
-            Err(TuicrError::UnsupportedOperation(_)) => false,
-            Err(e) => return Err(e),
-        };
-
-        let has_unstaged_changes = match Self::get_unstaged_diff_with_ignore(
-            self.vcs.as_ref(),
-            &self.vcs_info.root_path,
-            highlighter,
-            self.path_filter.as_deref(),
-        ) {
-            Ok(_) => true,
-            Err(TuicrError::NoChanges) => false,
-            Err(TuicrError::UnsupportedOperation(_)) => false,
-            Err(e) => return Err(e),
-        };
+        )?;
+        let has_staged_changes = change_status.staged;
+        let has_unstaged_changes = change_status.unstaged;
 
         let commits = self.vcs.get_recent_commits(0, VISIBLE_COMMIT_COUNT)?;
         if commits.is_empty() && !has_staged_changes && !has_unstaged_changes {
@@ -5811,6 +5842,143 @@ mod find_source_line_tests {
 
         let result = find_source_line(&annotations, 0, 20);
         assert_eq!(result, FindSourceLineResult::Nearest(0));
+    }
+}
+
+#[cfg(test)]
+mod change_status_tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::vcs::traits::VcsType;
+
+    struct StatusProbeMock {
+        info: VcsInfo,
+        status: VcsChangeStatus,
+        staged_files: Vec<DiffFile>,
+        unstaged_files: Vec<DiffFile>,
+    }
+
+    impl VcsBackend for StatusProbeMock {
+        fn info(&self) -> &VcsInfo {
+            &self.info
+        }
+
+        fn get_working_tree_diff(&self, _highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFile>> {
+            Err(TuicrError::NoChanges)
+        }
+
+        fn get_staged_diff(&self, _highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFile>> {
+            if self.staged_files.is_empty() {
+                Err(TuicrError::NoChanges)
+            } else {
+                Ok(self.staged_files.clone())
+            }
+        }
+
+        fn get_unstaged_diff(&self, _highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFile>> {
+            if self.unstaged_files.is_empty() {
+                Err(TuicrError::NoChanges)
+            } else {
+                Ok(self.unstaged_files.clone())
+            }
+        }
+
+        fn get_change_status(&self) -> Result<VcsChangeStatus> {
+            Ok(self.status)
+        }
+
+        fn fetch_context_lines(
+            &self,
+            _file_path: &Path,
+            _file_status: FileStatus,
+            _start_line: u32,
+            _end_line: u32,
+        ) -> Result<Vec<DiffLine>> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn diff_file(path: &str) -> DiffFile {
+        DiffFile {
+            old_path: None,
+            new_path: Some(PathBuf::from(path)),
+            status: FileStatus::Modified,
+            hunks: Vec::new(),
+            is_binary: false,
+            is_too_large: false,
+            is_commit_message: false,
+            content_hash: 0,
+        }
+    }
+
+    fn mock_vcs(root_path: PathBuf) -> StatusProbeMock {
+        StatusProbeMock {
+            info: VcsInfo {
+                root_path,
+                head_commit: "HEAD".to_string(),
+                branch_name: Some("main".to_string()),
+                vcs_type: VcsType::Git,
+            },
+            status: VcsChangeStatus {
+                staged: true,
+                unstaged: true,
+            },
+            staged_files: Vec::new(),
+            unstaged_files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn status_probe_rechecks_positive_rows_when_ignore_rules_exist() {
+        let dir = tempdir().expect("failed to create temp dir");
+        fs::write(dir.path().join(".tuicrignore"), "ignored/\n")
+            .expect("failed to write .tuicrignore");
+        let mut vcs = mock_vcs(dir.path().to_path_buf());
+        vcs.staged_files = vec![diff_file("ignored/generated.rs")];
+        vcs.unstaged_files = vec![diff_file("src/lib.rs")];
+
+        let (status, used_probe) = App::get_change_status_with_ignore(
+            &vcs,
+            dir.path(),
+            &SyntaxHighlighter::default(),
+            None,
+        )
+        .expect("failed to get change status");
+
+        assert!(used_probe);
+        assert_eq!(
+            status,
+            VcsChangeStatus {
+                staged: false,
+                unstaged: true,
+            }
+        );
+    }
+
+    #[test]
+    fn status_probe_does_not_load_diffs_without_ignore_rules() {
+        let dir = tempdir().expect("failed to create temp dir");
+        let vcs = mock_vcs(dir.path().to_path_buf());
+
+        let (status, used_probe) = App::get_change_status_with_ignore(
+            &vcs,
+            dir.path(),
+            &SyntaxHighlighter::default(),
+            None,
+        )
+        .expect("failed to get change status");
+
+        assert!(used_probe);
+        assert_eq!(
+            status,
+            VcsChangeStatus {
+                staged: true,
+                unstaged: true,
+            }
+        );
     }
 }
 

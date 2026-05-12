@@ -15,10 +15,8 @@ pub struct Libgit2Backend {
 }
 
 impl Libgit2Backend {
-    /// Discover a git repository from the current directory.
-    pub fn discover() -> Result<Self> {
-        let cwd = std::env::current_dir().map_err(|_| TuicrError::NotARepository)?;
-        let repo = Repository::discover(&cwd).map_err(|_| TuicrError::NotARepository)?;
+    pub(super) fn discover_from(cwd: &Path) -> Result<Self> {
+        let repo = Repository::discover(cwd).map_err(|_| TuicrError::NotARepository)?;
 
         let root_path = repo
             .workdir()
@@ -54,6 +52,10 @@ impl Libgit2Backend {
 impl VcsBackend for Libgit2Backend {
     fn info(&self) -> &VcsInfo {
         &self.info
+    }
+
+    fn supports_sparse_checkout(&self) -> bool {
+        false
     }
 
     fn get_working_tree_diff(&self, highlighter: &SyntaxHighlighter) -> Result<Vec<DiffFile>> {
