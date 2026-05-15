@@ -298,6 +298,17 @@ fn comment_word_right(buffer: &str, cursor: usize) -> usize {
     buffer.len()
 }
 
+/// Append a pasted payload into a single-line buffer, dropping embedded
+/// newlines so a multi-line paste doesn't smear across the prompt.
+fn push_single_line(buffer: &mut String, text: &str) {
+    for ch in text.chars() {
+        if matches!(ch, '\n' | '\r') {
+            continue;
+        }
+        buffer.push(ch);
+    }
+}
+
 /// Handle actions in Help mode (scrolling only)
 pub fn handle_help_action(app: &mut App, action: Action) {
     match action {
@@ -321,6 +332,7 @@ pub fn handle_help_action(app: &mut App, action: Action) {
 pub fn handle_command_action(app: &mut App, action: Action) {
     match action {
         Action::InsertChar(c) => app.command_buffer.push(c),
+        Action::Paste(text) => push_single_line(&mut app.command_buffer, &text),
         Action::DeleteChar => {
             app.command_buffer.pop();
         }
@@ -511,6 +523,7 @@ pub fn handle_command_action(app: &mut App, action: Action) {
 pub fn handle_search_action(app: &mut App, action: Action) {
     match action {
         Action::InsertChar(c) => app.search_buffer.push(c),
+        Action::Paste(text) => push_single_line(&mut app.search_buffer, &text),
         Action::DeleteChar => {
             app.search_buffer.pop();
         }
@@ -553,6 +566,12 @@ pub fn handle_comment_action(app: &mut App, action: Action) {
         Action::InsertChar(c) => {
             app.comment_buffer.insert(app.comment_cursor, c);
             app.comment_cursor += c.len_utf8();
+        }
+        Action::Paste(text) => {
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            app.comment_buffer
+                .insert_str(app.comment_cursor, &normalized);
+            app.comment_cursor += normalized.len();
         }
         Action::DeleteChar => {
             app.comment_cursor = delete_char_before(&mut app.comment_buffer, app.comment_cursor);
@@ -721,6 +740,11 @@ fn handle_pr_target_action(app: &mut App, action: Action) {
 fn handle_pr_filter_action(app: &mut App, action: Action) {
     match action {
         Action::InsertChar(c) => app.pr_filter_insert_char(c),
+        Action::Paste(text) => {
+            for ch in text.chars().filter(|c| !matches!(*c, '\n' | '\r')) {
+                app.pr_filter_insert_char(ch);
+            }
+        }
         Action::DeleteChar => app.pr_filter_delete_char(),
         Action::DeleteWord => {
             // Soft word-delete: collapses to clear-line for the v1 cut.

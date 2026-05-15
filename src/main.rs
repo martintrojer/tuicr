@@ -25,8 +25,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{
@@ -60,6 +61,7 @@ fn main() -> anyhow::Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
+        let _ = execute!(io::stdout(), DisableBracketedPaste);
         let _ = execute!(io::stdout(), DisableMouseCapture);
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
@@ -221,6 +223,11 @@ fn main() -> anyhow::Result<()> {
     if mouse_enabled {
         execute!(tty_output, EnableMouseCapture)?;
     }
+
+    // Bracketed paste so multi-line / control-char pastes arrive as a single
+    // Event::Paste, instead of each character driving Normal-mode actions
+    // (Enter submitting, ':' opening command mode, etc.) mid-paste.
+    execute!(tty_output, EnableBracketedPaste)?;
 
     // Enable keyboard enhancement for better modifier key detection (e.g., Alt+Enter)
     // This is supported by modern terminals like Kitty, iTerm2, WezTerm, etc.
@@ -533,6 +540,20 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 Event::Mouse(mouse_event) => handle_mouse_event(&mut app, mouse_event),
+                Event::Paste(text) => {
+                    // Bracketed-paste payload — route to whichever handler is
+                    // currently accepting text input. Other modes ignore.
+                    let action = Action::Paste(text);
+                    match app.input_mode {
+                        InputMode::Comment => handle_comment_action(&mut app, action),
+                        InputMode::Command => handle_command_action(&mut app, action),
+                        InputMode::Search => handle_search_action(&mut app, action),
+                        InputMode::CommitSelect if app.pr_filter_editing() => {
+                            handle_commit_select_action(&mut app, action)
+                        }
+                        _ => {}
+                    }
+                }
                 _ => {}
             }
         }
@@ -544,6 +565,7 @@ fn main() -> anyhow::Result<()> {
 
     // Restore terminal
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    let _ = execute!(terminal.backend_mut(), DisableBracketedPaste);
     if mouse_enabled {
         let _ = execute!(terminal.backend_mut(), DisableMouseCapture);
     }

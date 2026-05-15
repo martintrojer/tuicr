@@ -58,6 +58,10 @@ pub enum Action {
 
     // Text input
     InsertChar(char),
+    /// Bracketed-paste payload from the terminal. Carries the full pasted
+    /// string so multi-line / shifted input doesn't get re-interpreted as
+    /// keystrokes (Enter submitting, ':' opening command mode, etc.).
+    Paste(String),
     DeleteChar,
     DeleteWord,
     ClearLine,
